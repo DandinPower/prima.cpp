@@ -147,6 +147,11 @@ struct gpt_params {
     uint32_t n_layer_window[32]   =   {0}; // layer window size on each node
     std::string master_ip         = "localhost"; // ip address of the master node
     std::string next_node_ip      = "localhost"; // ip address of my next node
+    uint32_t    data_port         = 9000;      // base data port for this node
+    uint32_t    signal_port       = 10000;     // base signal port for this node
+    uint32_t    master_data_port      = 9000;  // data port base for master node
+    uint32_t    next_node_data_port   = 9000;  // data port base for next node
+    uint32_t    next_node_signal_port = 10000; // signal port base for next node
     bool    prefetch              = false; // prefetch layer weights
     bool    keep_out_in_metal     =  true; // whether to keep output weights in metal memory, true by default
     bool    force                 = false; // force to start prefetching after computation

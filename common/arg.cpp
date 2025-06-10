@@ -724,6 +724,41 @@ gpt_params_context gpt_params_parser_init(gpt_params & params, llama_example ex,
         }
     ).set_env("LLAMA_ARG_NEXT_NODE_IP"));
     add_opt(llama_arg(
+        {"--data-port"}, "PORT",
+        format("data port base for this node (default: %d)", params.data_port),
+        [](gpt_params & params, int value) {
+            params.data_port = value;
+        }
+    ));
+    add_opt(llama_arg(
+        {"--signal-port"}, "PORT",
+        format("signal port base for this node (default: %d)", params.signal_port),
+        [](gpt_params & params, int value) {
+            params.signal_port = value;
+        }
+    ));
+    add_opt(llama_arg(
+        {"--master-data-port"}, "PORT",
+        format("master node data port base (default: %d)", params.master_data_port),
+        [](gpt_params & params, int value) {
+            params.master_data_port = value;
+        }
+    ));
+    add_opt(llama_arg(
+        {"--next-node-data-port"}, "PORT",
+        format("next node data port base (default: %d)", params.next_node_data_port),
+        [](gpt_params & params, int value) {
+            params.next_node_data_port = value;
+        }
+    ));
+    add_opt(llama_arg(
+        {"--next-node-signal-port"}, "PORT",
+        format("next node signal port base (default: %d)", params.next_node_signal_port),
+        [](gpt_params & params, int value) {
+            params.next_node_signal_port = value;
+        }
+    ));
+    add_opt(llama_arg(
         {"--prefetch"},
         format("whether to prefetch layer weights (default: %s)", params.prefetch ? "true" : "false"),
         [](gpt_params & params) {
