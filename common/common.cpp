@@ -1999,6 +1999,11 @@ struct llama_context_params llama_context_params_from_gpt_params(const gpt_param
     }
     cparams.master_ip         = new char[params.master_ip.length() + 1];
     std::strcpy(cparams.master_ip, params.master_ip.c_str());
+    cparams.data_port         = params.data_port;
+    cparams.signal_port       = params.signal_port;
+    cparams.master_data_port      = params.master_data_port;
+    cparams.next_node_data_port   = params.next_node_data_port;
+    cparams.next_node_signal_port = params.next_node_signal_port;
 
     if (cparams.next_node_ip != nullptr) {
         delete[] cparams.next_node_ip;

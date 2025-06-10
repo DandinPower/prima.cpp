@@ -3438,6 +3438,9 @@ struct llama_context {
     std::string      next_node_ip  = "localhost";
     uint32_t         data_port     = 9000;
     uint32_t         signal_port   = 10000;
+    uint32_t         master_data_port      = 9000;
+    uint32_t         next_node_data_port   = 9000;
+    uint32_t         next_node_signal_port = 10000;
     zmq::context_t * sock_context  = nullptr;
     zmq::socket_t  * send_socket   = nullptr; 
     zmq::socket_t  * recv_socket   = nullptr; 
@@ -20237,6 +20240,11 @@ struct llama_context_params llama_context_default_params() {
         /*.keep_out_in_metal           =*/ true,
         /*.master_ip                   =*/ nullptr,
         /*.next_node_ip                =*/ nullptr,
+        /*.data_port                   =*/ 9000,
+        /*.signal_port                 =*/ 10000,
+        /*.master_data_port            =*/ 9000,
+        /*.next_node_data_port         =*/ 9000,
+        /*.next_node_signal_port       =*/ 10000,
         /*.n_ctx                       =*/ 512,
         /*.n_predict                   =*/ 512,
         /*.n_batch                     =*/ 2048,
@@ -20441,8 +20449,8 @@ void llama_init_sockets(struct llama_context * ctx, uint32_t n_world, uint32_t m
 
     const uint32_t next_rank = (my_rank + 1) % n_world;
     std::string recv_endp   = "tcp://*:"                         + std::to_string(map_rank_to_port(my_rank,   ctx->data_port));
-    std::string send_endp   = "tcp://" + ctx->next_node_ip + ":" + std::to_string(map_rank_to_port(next_rank, ctx->data_port));
-    std::string master_endp = "tcp://" + ctx->master_ip    + ":" + std::to_string(map_rank_to_port(0,         ctx->data_port));
+    std::string send_endp   = "tcp://" + ctx->next_node_ip + ":" + std::to_string(map_rank_to_port(next_rank, ctx->next_node_data_port));
+    std::string master_endp = "tcp://" + ctx->master_ip    + ":" + std::to_string(map_rank_to_port(0,         ctx->master_data_port));
     std::string signal_endp = "tcp://*:"                         + std::to_string(map_rank_to_port(my_rank,   ctx->signal_port));
 
     try {
@@ -20653,7 +20661,7 @@ int llama_rebuild_topo(llama_context * ctx, uint32_t * n_layer_window, device_in
             if ((my_rank + 1) % n_world != next_rank) {   
                 socket_to_close = ctx->send_socket;  
                 ctx->send_socket = new zmq::socket_t(*ctx->sock_context, zmq::socket_type::push);
-                std::string send_endp = "tcp://" + next_ip + ":" + std::to_string(map_rank_to_port(next_rank, ctx->data_port));
+                std::string send_endp = "tcp://" + next_ip + ":" + std::to_string(map_rank_to_port(next_rank, ctx->next_node_data_port));
                 ctx->send_socket->connect(send_endp);
                 ctx->next_node_ip = next_ip;
                 ctx->cparams.original_next_rank = next_rank;
@@ -20731,7 +20739,7 @@ void llama_free_sockets(struct llama_context * ctx, char ** msg) {
     }
 
     zmq::socket_t signal_sender(*ctx->sock_context, zmq::socket_type::push);
-    std::string endp = "tcp://" + ctx->next_node_ip + ":" + std::to_string(map_rank_to_port(next_rank, ctx->signal_port));
+    std::string endp = "tcp://" + ctx->next_node_ip + ":" + std::to_string(map_rank_to_port(next_rank, ctx->next_node_signal_port));
     signal_sender.connect(endp);
 
     if (my_rank == 0) {
@@ -20770,6 +20778,11 @@ struct llama_context * llama_new_context_with_model(
 
     ctx->master_ip       = params.master_ip;
     ctx->next_node_ip    = params.next_node_ip;
+    ctx->data_port       = params.data_port;
+    ctx->signal_port     = params.signal_port;
+    ctx->master_data_port      = params.master_data_port;
+    ctx->next_node_data_port   = params.next_node_data_port;
+    ctx->next_node_signal_port = params.next_node_signal_port;
     ctx->cparams.n_world = params.n_world;
     ctx->cparams.rank    = params.rank;
     ctx->cparams.force   = params.force;
