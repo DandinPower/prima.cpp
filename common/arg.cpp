@@ -1511,6 +1511,13 @@ gpt_params_context gpt_params_parser_init(gpt_params & params, llama_example ex,
     ).set_env("LLAMA_ARG_RPC"));
 #endif
     add_opt(llama_arg(
+        {"--splits"}, "LIST",
+        "comma separated list of GGUF split indexes to load (add 0 to load tensors from the first split)",
+        [](gpt_params & params, const std::string & value) {
+            params.gguf_splits = value;
+        }
+    ));
+    add_opt(llama_arg(
         {"--mlock"},
         "force system to keep model in RAM rather than swapping or compressing",
         [](gpt_params & params) {

@@ -297,6 +297,8 @@ extern "C" {
 
         // comma separated list of RPC servers to use for offloading
         const char * rpc_servers;
+        // comma separated list of GGUF split indexes to load; include 0 if the first split's tensors are needed
+        const char * gguf_splits;
 
         // Called with a progress value between 0.0 and 1.0. Pass NULL to disable.
         // If the provided progress_callback returns true, model loading continues.

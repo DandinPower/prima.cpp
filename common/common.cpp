@@ -1943,6 +1943,7 @@ struct llama_model_params llama_model_params_from_gpt_params(const gpt_params & 
     mparams.n_world         = params.n_world;
     mparams.rank            = params.rank;
     mparams.rpc_servers     = params.rpc_servers.c_str();
+    mparams.gguf_splits     = params.gguf_splits.c_str();
     mparams.main_gpu        = params.main_gpu;
     mparams.split_mode      = params.split_mode;
     mparams.tensor_split    = params.tensor_split;

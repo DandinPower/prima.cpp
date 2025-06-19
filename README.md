@@ -222,6 +222,48 @@ Take QwQ-32B as an example, run the following commands on the devices to launch 
 
 Once started, prima.cpp will profile each device and decide how much workload to assign, e.g., how many model layers each device should handle, and how many of them should run on GPU (if available).
 
+### Load Multiple GGUF Splits
+`gguf-split` can divide a model into several files, e.g., running
+
+```shell
+./gguf-split --split-max-tensors 128 llama.gguf llama.gguf
+```
+
+creates files `llama.gguf-00001-of-00004.gguf` … `llama.gguf-00004-of-00004.gguf`.
+To load such a split model, pass the first split (e.g., `llama.gguf-00001-of-00004.gguf`) via `-m` (used only for metadata) and list *all*
+required splits using `--splits` (indexes start at zero).
+ Split indexes can be assigned arbitrarily to ranks, and a rank may load multiple splits or share splits with others.
+
+Examples:
+
+- **4 splits, 2 ranks**
+  ```shell
+  # rank 0 loads splits 0 and 1
+  ./llama-cli -m llama.gguf-00001-of-00004.gguf --splits 0,1 \
+              --world 2 --rank 0
+  # rank 1 loads splits 2 and 3
+  ./llama-cli -m llama.gguf-00001-of-00004.gguf --splits 2,3 \
+              --world 2 --rank 1
+  ```
+- **2 splits, 4 ranks**
+  ```shell
+  # ranks 0 and 1 load split 0
+  ./llama-cli -m model.gguf-00001-of-00002.gguf --splits 0 --world 4 --rank 0
+  ./llama-cli -m model.gguf-00001-of-00002.gguf --splits 0 --world 4 --rank 1
+  # ranks 2 and 3 load split 1
+  ./llama-cli -m model.gguf-00001-of-00002.gguf --splits 1 --world 4 --rank 2
+  ./llama-cli -m model.gguf-00001-of-00002.gguf --splits 1 --world 4 --rank 3
+  ```
+
+Ensure `--world` and `--n-layer-window` (or `--n-gpu-layers`) are set so each
+rank only processes its assigned layers. The loader reports an error if a needed
+tensor is missing from the provided splits.
+
+This split-loading mechanism only checks that every rank receives the tensors
+for the layers it will run. For reliable control over the mapping of layers to
+ranks, explicitly set `-lw`/`--n-layer-window` so you know exactly which split
+IDs to include in `--splits`.
+
 ### (Optional) Run with Prebuilt Docker Image
 Assume we have a host machine with at least 32 CPU cores, 32 GiB RAM, and 32 GiB VRAM. We simulate 4 homogeneous nodes using Docker containers, with each node allocated 8 CPU cores, 8 GiB RAM, and 8 GiB VRAM. Follow the below steps to get started:
 

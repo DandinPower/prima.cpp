@@ -4722,6 +4722,9 @@ struct llama_model_loader {
     llama_fver  fver;
 
     llama_mmaps mappings;
+    uint32_t my_rank = 0;
+    uint32_t n_world = 1;
+    std::set<uint32_t> split_list;
 
     // Holds information on a model weight
     struct llama_tensor_weight {
@@ -4754,10 +4757,19 @@ struct llama_model_loader {
     std::string arch_name;
     LLM_KV      llm_kv    = LLM_KV(LLM_ARCH_UNKNOWN);
 
-    llama_model_loader(const std::string & fname, bool use_mmap, bool check_tensors, const struct llama_model_kv_override * param_overrides_p) {
+    llama_model_loader(const std::string & fname, bool use_mmap, bool check_tensors, const struct llama_model_kv_override * param_overrides_p,
+                       uint32_t rank = 0, uint32_t world = 1, const char * split_str = nullptr) {
+        my_rank = rank;
+        n_world = world;
         int trace = 0;
         if (getenv("LLAMA_TRACE")) {
             trace = atoi(getenv("LLAMA_TRACE"));
+        }
+
+        if (split_str && split_str[0] != '\0') {
+            for (int s : string_split<int>(split_str, ',')) {
+                if (s >= 0) split_list.insert((uint32_t)s);
+            }
         }
 
         if (param_overrides_p != nullptr) {
@@ -4783,21 +4795,23 @@ struct llama_model_loader {
         files.emplace_back(new llama_file(fname.c_str(), "rb"));
         contexts.emplace_back(ctx);
 
-        // Save tensors data offset of the main file.
+        // Save tensors data offset of the main file if this split is requested
         // For subsidiary files, `meta` tensor data offset must not be used,
         // so we build a unified tensors index for weights.
-        for (ggml_tensor * cur = ggml_get_first_tensor(ctx); cur; cur = ggml_get_next_tensor(ctx, cur)) {
-            weights.emplace_back(files.back().get(), 0, cur->name, meta, cur);
+        if (split_list.empty() || split_list.count(0) > 0) {
+            for (ggml_tensor * cur = ggml_get_first_tensor(ctx); cur; cur = ggml_get_next_tensor(ctx, cur)) {
+                weights.emplace_back(files.back().get(), 0, cur->name, meta, cur);
+            }
         }
         uint16_t n_split = 0;
         get_key(llm_kv(LLM_KV_SPLIT_COUNT), n_split, false);
 
-        // Load additional GGML contexts
+        // Split file verification and loading additional splits
         if (n_split > 1) {
             uint16_t idx = 0;
             get_key(llm_kv(LLM_KV_SPLIT_NO), idx);
             if (idx != 0) {
-                throw std::runtime_error(format("illegal split file: %d, model must be loaded with the first split", idx));
+                throw std::runtime_error(format("illegal split file: %d, first split expected", idx));
             }
 
             char split_prefix[PATH_MAX] = {0};
@@ -4805,13 +4819,21 @@ struct llama_model_loader {
                 throw std::runtime_error(format("invalid split file: %s", fname.c_str()));
             }
 
-            if (trace > 0) {
-                LLAMA_LOG_INFO("%s: loading additional %d GGUFs\n", __func__, n_split);
+            if (split_list.empty()) {
+                for (idx = 0; idx < n_split; ++idx) {
+                    split_list.insert(idx);
+                }
             }
 
             char split_path[PATH_MAX] = {0};
-            for (idx = 1; idx < n_split; idx++) {
-                llama_split_path(split_path, sizeof(split_path), split_prefix, idx, n_split);
+            for (uint16_t sid : split_list) {
+                if (sid == 0) {
+                    continue;
+                }
+                if (sid >= n_split) {
+                    throw std::runtime_error(format("split index %d out of range", sid));
+                }
+                llama_split_path(split_path, sizeof(split_path), split_prefix, sid, n_split);
 
                 struct gguf_init_params split_params = {
                     /*.no_alloc = */ true,
@@ -4825,25 +4847,14 @@ struct llama_model_loader {
                 files.emplace_back(new llama_file(split_path, "rb"));
                 contexts.emplace_back(ctx);
 
-                // Save tensors data offset info of the shard.
                 for (ggml_tensor * cur = ggml_get_first_tensor(ctx); cur; cur = ggml_get_next_tensor(ctx, cur)) {
-                    weights.emplace_back(files.back().get(), idx, cur->name, ctx_gguf, cur);
+                    weights.emplace_back(files.back().get(), sid, cur->name, ctx_gguf, cur);
                 }
 
                 gguf_free(ctx_gguf);
             }
 
-            get_key(llm_kv(LLM_KV_SPLIT_TENSORS_COUNT), n_tensors);
-
-            // sanity check
-            {
-                const int n_tensors_loaded = (int) weights.size();
-                if (n_tensors != n_tensors_loaded) {
-                    throw std::runtime_error(format("corrupted model: %d tensors expected but %d found", n_tensors, n_tensors_loaded));
-                }
-            }
-
-            LLAMA_LOG_INFO("%s: additional %d GGUFs metadata loaded.\n",  __func__, n_split - 1);
+            get_key(llm_kv(LLM_KV_SPLIT_TENSORS_COUNT), n_tensors, false);
         }
 
         n_kv      = gguf_get_n_kv(meta);
@@ -9550,7 +9561,8 @@ int llm_load_tensors(
 // Returns 0 on success, -1 on error, and -2 on cancellation via llama_progress_callback
 static llama_model_loader * llama_model_load_impl(const std::string & fname, llama_model & model, llama_model_params & params) {
     try {
-        llama_model_loader * ml = new llama_model_loader(fname, params.use_mmap, params.check_tensors, params.kv_overrides);
+        llama_model_loader * ml = new llama_model_loader(fname, params.use_mmap, params.check_tensors, params.kv_overrides,
+                                                         params.rank, params.n_world, params.gguf_splits);
 
         model.hparams.vocab_only = params.vocab_only;
 
@@ -19636,7 +19648,7 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
         auto v = (std::vector<llama_model_kv_override>*)params->kv_overrides;
         kv_overrides = v->data();
     }
-    llama_model_loader ml(fname_inp, use_mmap, /*check_tensors*/ true, kv_overrides);
+    llama_model_loader ml(fname_inp, use_mmap, /*check_tensors*/ true, kv_overrides, 0, 1, nullptr);
     ml.init_mappings(false); // no prefetching
 
     llama_model model;
@@ -20210,6 +20222,7 @@ struct llama_model_params llama_model_default_params() {
         /*.main_gpu                    =*/ 0,
         /*.tensor_split                =*/ nullptr,
         /*.rpc_servers                 =*/ nullptr,
+        /*.gguf_splits                 =*/ nullptr,
         /*.progress_callback           =*/ nullptr,
         /*.progress_callback_user_data =*/ nullptr,
         /*.kv_overrides                =*/ nullptr,
