@@ -4766,9 +4766,17 @@ struct llama_model_loader {
             trace = atoi(getenv("LLAMA_TRACE"));
         }
 
-        if (split_str && split_str[0] != '\0') {
-            for (int s : string_split<int>(split_str, ',')) {
-                if (s >= 0) split_list.insert((uint32_t)s);
+        if (split_str && *split_str) {
+            std::string tmp{split_str};
+            std::stringstream ss(tmp);
+            std::string tok;
+            while (std::getline(ss, tok, ',')) {
+                try {
+                    auto v = std::stoi(tok);
+                    if (v >= 0) split_list.insert(static_cast<uint32_t>(v));
+                } catch (...) {
+                    // ignore bad tokens
+                }
             }
         }
 
