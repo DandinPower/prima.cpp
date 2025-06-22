@@ -222,47 +222,46 @@ Take QwQ-32B as an example, run the following commands on the devices to launch 
 
 Once started, prima.cpp will profile each device and decide how much workload to assign, e.g., how many model layers each device should handle, and how many of them should run on GPU (if available).
 
-### Load Multiple GGUF Splits
-`gguf-split` can divide a model into several files, e.g., running
+### Effecient Multi-Split GGUF Support in `prima.cpp`
+
+If your model is split into multiple GGUF files using `gguf-split`, for example by running:
 
 ```shell
 ./gguf-split --split-max-tensors 128 llama.gguf llama.gguf
 ```
 
-creates files `llama.gguf-00001-of-00004.gguf` … `llama.gguf-00004-of-00004.gguf`.
-To load such a split model, pass the first split (e.g., `llama.gguf-00001-of-00004.gguf`) via `-m` (used only for metadata) and list *all*
-required splits using `--splits` (indexes start at zero).
- Split indexes can be assigned arbitrarily to ranks, and a rank may load multiple splits or share splits with others.
+You may end up with files like:
 
-Examples:
+```
+llama.gguf-00001-of-00004.gguf
+llama.gguf-00002-of-00004.gguf
+llama.gguf-00003-of-00004.gguf
+llama.gguf-00004-of-00004.gguf
+```
 
-- **4 splits, 2 ranks**
-  ```shell
-  # rank 0 loads splits 0 and 1
-  ./llama-cli -m llama.gguf-00001-of-00004.gguf --splits 0,1 \
-              --world 2 --rank 0
-  # rank 1 loads splits 2 and 3
-  ./llama-cli -m llama.gguf-00001-of-00004.gguf --splits 2,3 \
-              --world 2 --rank 1
-  ```
-- **2 splits, 4 ranks**
-  ```shell
-  # ranks 0 and 1 load split 0
-  ./llama-cli -m model.gguf-00001-of-00002.gguf --splits 0 --world 4 --rank 0
-  ./llama-cli -m model.gguf-00001-of-00002.gguf --splits 0 --world 4 --rank 1
-  # ranks 2 and 3 load split 1
-  ./llama-cli -m model.gguf-00001-of-00002.gguf --splits 1 --world 4 --rank 2
-  ./llama-cli -m model.gguf-00001-of-00002.gguf --splits 1 --world 4 --rank 3
-  ```
+Unlike `llama.cpp`, which typically requires loading all splits, `prima.cpp` only needs to load the GGUF splits that contain the weights for the layers assigned to the current rank. Downloading or loading all splits is unnecessary and inefficient. Please note that prima.cpp enforces a layer assignment policy where the first and last layers are always allocated to the master rank. 
 
-Ensure `--world` and `--n-layer-window` (or `--n-gpu-layers`) are set so each
-rank only processes its assigned layers. The loader reports an error if a needed
-tensor is missing from the provided splits.
+* **Rank 0** (the master node) always owns the **embedding-related layers** and the **last portion** of transformer blocks.
+* **Rank 1** (the first non-master node) always starts from **layer 0**.
 
-This split-loading mechanism only checks that every rank receives the tensors
-for the layers it will run. For reliable control over the mapping of layers to
-ranks, explicitly set `-lw`/`--n-layer-window` so you know exactly which split
-IDs to include in `--splits`.
+For example, if `--n-layer-window` (`-lw`) is set to `"8,8"` and `--world` is `2`, the layer distribution is:
+
+* Rank 0 (master) owns: **embedding related layers** and **layers 8–15**
+* Rank 1 (server) owns: **layers 0–7**
+
+Assuming the model is split into 4 parts, the proper usage of `--splits` would be:
+
+#### Example: 4 Splits, 2 Ranks
+
+```bash
+# Rank 0 (master) loads splits 0, 2 and 3
+./llama-cli -m llama.gguf-00001-of-00004.gguf --splits 0,2,3 --world 2 --rank 0 <OTHER FLAGS>
+
+# Rank 1 (server) loads splits 0 and 1
+./llama-cli -m llama.gguf-00001-of-00004.gguf --splits 0,1 --world 2 --rank 1 <OTHER FLAGS>
+```
+
+If a required tensor is missing from the specified splits, the loader will raise an error. To ensure correct mapping and avoid runtime errors, it is recommended to  **explicitly set `--n-layer-window`** so that you can precisely determine which layer belongs to which rank, and in turn which split files to include in the `--splits` flag.
 
 ### (Optional) Run with Prebuilt Docker Image
 Assume we have a host machine with at least 32 CPU cores, 32 GiB RAM, and 32 GiB VRAM. We simulate 4 homogeneous nodes using Docker containers, with each node allocated 8 CPU cores, 8 GiB RAM, and 8 GiB VRAM. Follow the below steps to get started:
