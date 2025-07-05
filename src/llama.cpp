@@ -92,6 +92,18 @@
 #include <chrono>
 #include <regex>
 #include <inttypes.h>
+#include <iomanip>
+
+std::string get_iso8601_ms_timestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    auto now_c = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_utc = *std::gmtime(&now_c);
+    std::ostringstream oss;
+    oss << std::put_time(&tm_utc, "%Y-%m-%dT%H:%M:%S");
+    oss << '.' << std::setw(3) << std::setfill('0') << now_ms.count() << 'Z';
+    return oss.str();
+}
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -18489,7 +18501,9 @@ static int llama_decode_internal(
 
             // receive data from other nodes
             if (n_world > 1 && !(my_rank == 0 && i == 0) && !(my_rank == 0 && is_last_l)) {
+                LLAMA_LOG_INFO("[%d][%s][comm][start][recv_tensors][n_tokens: %u, receive data from other nodes]\n", my_rank, get_iso8601_ms_timestamp().c_str(), n_tokens_all);
                 llama_recv_tensors(*lctx.recv_socket, &ubatch, is_out_embd);
+                LLAMA_LOG_INFO("[%d][%s][comm][end][recv_tensors][receive data from other nodes]\n", my_rank, get_iso8601_ms_timestamp().c_str());
             }
 
             // ensure ggml_backend_tensor_get_async of the previous subgraph has finished
@@ -18503,12 +18517,32 @@ static int llama_decode_internal(
             
             llama_set_inputs(lctx, ubatch);
 
+            std::string start_compute_time = get_iso8601_ms_timestamp();
             {   // compute graph
                 timer(llama_graph_compute);
                 llama_graph_compute(lctx, sub_gf, lctx.sched[i], n_threads, threadpool); 
             }
-
+            std::string end_compute_time = get_iso8601_ms_timestamp();
+    
             sub_gf_out = ggml_graph_node(sub_gf, -1);
+
+            bool log_layer = false;
+            char layer_desc[32];
+            if (strcmp(sub_gf_out->name, "inp_embd") == 0) {
+                snprintf(layer_desc, sizeof(layer_desc), "input_embedding");
+                log_layer = true;
+            } else if (strcmp(sub_gf_out->name, "result_output") == 0) {
+                snprintf(layer_desc, sizeof(layer_desc), "output_linear");
+                log_layer = true;
+            } else if (strncmp(sub_gf_out->name, "l_out", 5) == 0) {
+                snprintf(layer_desc, sizeof(layer_desc), "transformer_blocks");
+                log_layer = true;
+            }
+            if (log_layer) {
+                LLAMA_LOG_INFO("[%d][%s][compute][start][%s][N/A]\n", my_rank, start_compute_time.c_str(), layer_desc);
+                LLAMA_LOG_INFO("[%d][%s][compute][end][%s][N/A]\n", my_rank, end_compute_time.c_str(), layer_desc);
+            }
+
             is_output  = strcmp(sub_gf_out->name, "result_output") == 0;
             if (is_output) {
                 break;
@@ -18540,10 +18574,12 @@ static int llama_decode_internal(
 
             // send the result to the next node or the master
             if (!(n_world == 1 || (my_rank == 0 && is_last_l))) {
+                LLAMA_LOG_INFO("[%d][%s][comm][start][send_tensors][send the result to the next node or the master]\n", my_rank, get_iso8601_ms_timestamp().c_str());
                 struct input_tensors tensors = {sub_gf_out, lctx.inp_pos};
                 const bool is_to_master = my_rank != 0 && is_last_l;
                 zmq::socket_t * s = is_to_master ? lctx.master_socket : lctx.send_socket;
                 llama_send_tensors(*s, &ubatch, &tensors);
+                LLAMA_LOG_INFO("[%d][%s][comm][end][send_tensors][send the result to the next node or the master]\n", my_rank, get_iso8601_ms_timestamp().c_str());
             }
 
             // overlap memory scheduling with other nodes' communication and computing
