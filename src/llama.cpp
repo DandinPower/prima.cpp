@@ -18501,9 +18501,9 @@ static int llama_decode_internal(
 
             // receive data from other nodes
             if (n_world > 1 && !(my_rank == 0 && i == 0) && !(my_rank == 0 && is_last_l)) {
-                LLAMA_LOG_INFO("[%d][%s][comm][start][recv_tensors][n_tokens: %u, receive data from other nodes]\n", my_rank, get_iso8601_ms_timestamp().c_str(), n_tokens_all);
+                LLAMA_LOG_INFO("[%d][%s][comm][start][recv_tensors][sbatch_tokens: %u, ubatch_tokens: %u, receive data from other nodes]\n", my_rank, get_iso8601_ms_timestamp().c_str(), lctx.sbatch.n_tokens, ubatch.n_tokens);
                 llama_recv_tensors(*lctx.recv_socket, &ubatch, is_out_embd);
-                LLAMA_LOG_INFO("[%d][%s][comm][end][recv_tensors][receive data from other nodes]\n", my_rank, get_iso8601_ms_timestamp().c_str());
+                LLAMA_LOG_INFO("[%d][%s][comm][end][recv_tensors][sbatch_tokens: %u, ubatch_tokens: %u, receive data from other nodes]\n", my_rank, get_iso8601_ms_timestamp().c_str(), lctx.sbatch.n_tokens, ubatch.n_tokens);
             }
 
             // ensure ggml_backend_tensor_get_async of the previous subgraph has finished
@@ -18539,8 +18539,8 @@ static int llama_decode_internal(
                 log_layer = true;
             }
             if (log_layer) {
-                LLAMA_LOG_INFO("[%d][%s][compute][start][%s][N/A]\n", my_rank, start_compute_time.c_str(), layer_desc);
-                LLAMA_LOG_INFO("[%d][%s][compute][end][%s][N/A]\n", my_rank, end_compute_time.c_str(), layer_desc);
+                LLAMA_LOG_INFO("[%d][%s][compute][start][%s][sbatch_tokens: %u, ubatch_tokens: %u]\n", my_rank, start_compute_time.c_str(), layer_desc, lctx.sbatch.n_tokens, ubatch.n_tokens);
+                LLAMA_LOG_INFO("[%d][%s][compute][end][%s][sbatch_tokens: %u, ubatch_tokens: %u]\n", my_rank, end_compute_time.c_str(), layer_desc, lctx.sbatch.n_tokens, ubatch.n_tokens);
             }
 
             is_output  = strcmp(sub_gf_out->name, "result_output") == 0;
@@ -18574,12 +18574,12 @@ static int llama_decode_internal(
 
             // send the result to the next node or the master
             if (!(n_world == 1 || (my_rank == 0 && is_last_l))) {
-                LLAMA_LOG_INFO("[%d][%s][comm][start][send_tensors][send the result to the next node or the master]\n", my_rank, get_iso8601_ms_timestamp().c_str());
+                LLAMA_LOG_INFO("[%d][%s][comm][start][send_tensors][sbatch_tokens: %u, ubatch_tokens: %u, send the result to the next node or the master]\n", my_rank, get_iso8601_ms_timestamp().c_str(), lctx.sbatch.n_tokens, ubatch.n_tokens);
                 struct input_tensors tensors = {sub_gf_out, lctx.inp_pos};
                 const bool is_to_master = my_rank != 0 && is_last_l;
                 zmq::socket_t * s = is_to_master ? lctx.master_socket : lctx.send_socket;
                 llama_send_tensors(*s, &ubatch, &tensors);
-                LLAMA_LOG_INFO("[%d][%s][comm][end][send_tensors][send the result to the next node or the master]\n", my_rank, get_iso8601_ms_timestamp().c_str());
+                LLAMA_LOG_INFO("[%d][%s][comm][end][send_tensors][sbatch_tokens: %u, ubatch_tokens: %u, send the result to the next node or the master]\n", my_rank, get_iso8601_ms_timestamp().c_str(), lctx.sbatch.n_tokens, ubatch.n_tokens);
             }
 
             // overlap memory scheduling with other nodes' communication and computing
